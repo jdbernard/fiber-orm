@@ -2,7 +2,7 @@ import db_postgres, macros, options, sequtils, strutils, uuids
 
 from unicode import capitalize
 
-import ./fiber_orm_nim/util
+import ./fiber_orm/util
 
 type NotFoundError* = object of CatchableError
 
