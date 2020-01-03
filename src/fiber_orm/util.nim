@@ -269,11 +269,13 @@ proc typeOfColumn*(modelType: NimNode, colName: string): NimNode =
       else: error "Unknown column type: " & $fieldType.getTypeInst
 
     else: return fieldType
-      
+
   raise newException(Exception,
     "model of type '" & $modelType & "' has no column named '" & colName & "'")
 
-proc isZero(val: int): bool = return val == 0
+proc isEmpty(val: int): bool = return val == 0
+proc isEmpty(val: UUID): bool = return val.isZero
+proc isEmpty(val: string): bool = return val.isNilOrWhitespace
 
 macro populateMutateClauses*(t: typed, newRecord: bool, mc: var MutateClauses): untyped =
 
@@ -285,14 +287,14 @@ macro populateMutateClauses*(t: typed, newRecord: bool, mc: var MutateClauses): 
       # grab the field, it's string name, and it's type
       let fieldName = $fieldIdent
 
-      # we do not update the ID, but we do check: if we're creating a new
-      # record, we should not have an existing ID
+      # We only add clauses for the ID field if we're creating a new record and
+      # the caller provided a value..
       if fieldName == "id":
         result.add quote do:
-          if `newRecord` and not `t`.id.isZero:
-            raise newException(
-              AssertionError,
-              "Trying to create a new record, but the record already has an ID (" & $(`t`.id) & ").")
+          if `newRecord` and not `t`.id.isEmpty:
+            `mc`.columns.add(identNameToDb(`fieldName`))
+            `mc`.placeholders.add("?")
+            `mc`.values.add(dbFormat(`t`.`fieldIdent`))
 
       # if we're looking at an optional field, add logic to check for presence
       elif fieldType.kind == nnkBracketExpr and
