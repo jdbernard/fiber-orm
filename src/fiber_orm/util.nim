@@ -164,7 +164,11 @@ proc createParseStmt*(t, value: NimNode): NimNode =
       result = quote do: parsePGDatetime(`value`)
 
     elif t.getTypeInst == Option.getType:
-      let innerType = t.getTypeImpl[2][0][0][1]
+      var innerType = t.getTypeImpl[2][0] # start at the first RecList
+      # If the value is a non-pointer type, there is another inner RecList
+      if innerType.kind == nnkRecList: innerType = innerType[0]
+      innerType = innerType[1] # now we can take the field type from the first symbol
+
       let parseStmt = createParseStmt(innerType, value)
       result = quote do:
         if `value`.len == 0:  none[`innerType`]()
@@ -293,7 +297,7 @@ macro populateMutateClauses*(t: typed, newRecord: bool, mc: var MutateClauses): 
 
         result.add quote do:
           `mc`.columns.add(identNameToDb(`fieldName`))
-          if `t`.`fieldIdent`.isSome:
+          if isSome(`t`.`fieldIdent`):
             `mc`.placeholders.add("?")
             `mc`.values.add(dbFormat(`t`.`fieldIdent`.get))
           else:
