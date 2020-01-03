@@ -76,7 +76,7 @@ template findRecordsBy*(db: DbConn, modelType: type, lookups: seq[tuple[field: s
     lookups.mapIt(it.value))
   .mapIt(rowToModel(modelType, it))
 
-macro generateProcsForModels*(modelTypes: openarray[type]): untyped =
+macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untyped =
   result = newStmtList()
 
   for t in modelTypes:
@@ -89,22 +89,22 @@ macro generateProcsForModels*(modelTypes: openarray[type]): untyped =
     let deleteName = ident("delete" & modelName)
     let idType = typeOfColumn(t, "id")
     result.add quote do:
-      proc `getName`*(db: PMApiDb, id: `idType`): `t` = getRecord(db.conn, `t`, id)
-      proc `getAllName`*(db: PMApiDb): seq[`t`] = getAllRecords(db.conn, `t`)
-      proc `findWhereName`*(db: PMApiDb, whereClause: string, values: varargs[string, dbFormat]): seq[`t`] =
+      proc `getName`*(db: `dbType`, id: `idType`): `t` = getRecord(db.conn, `t`, id)
+      proc `getAllName`*(db: `dbType`): seq[`t`] = getAllRecords(db.conn, `t`)
+      proc `findWhereName`*(db: `dbType`, whereClause: string, values: varargs[string, dbFormat]): seq[`t`] =
         return findRecordsWhere(db.conn, `t`, whereClause, values)
-      proc `createName`*(db: PMApiDb, rec: `t`): `t` = createRecord(db.conn, rec)
-      proc `updateName`*(db: PMApiDb, rec: `t`): bool = updateRecord(db.conn, rec)
-      proc `deleteName`*(db: PMApiDb, rec: `t`): bool = deleteRecord(db.conn, rec)
-      proc `deleteName`*(db: PMApiDb, id: `idType`): bool = deleteRecord(db.conn, `t`, id)
+      proc `createName`*(db: `dbType`, rec: `t`): `t` = createRecord(db.conn, rec)
+      proc `updateName`*(db: `dbType`, rec: `t`): bool = updateRecord(db.conn, rec)
+      proc `deleteName`*(db: `dbType`, rec: `t`): bool = deleteRecord(db.conn, rec)
+      proc `deleteName`*(db: `dbType`, id: `idType`): bool = deleteRecord(db.conn, `t`, id)
 
-macro generateLookup*(modelType: type, fields: seq[string]): untyped =
+macro generateLookup*(dbType: type, modelType: type, fields: seq[string]): untyped =
   let fieldNames = fields[1].mapIt($it)
   let procName = ident("find" & $modelType.getType[1] & "sBy" & fieldNames.mapIt(it.capitalize).join("And"))
 
   # Create proc skeleton
   result = quote do:
-    proc `procName`*(db: PMApiDb): seq[`modelType`] =
+    proc `procName`*(db: `dbType`): seq[`modelType`] =
       return findRecordsBy(db.conn, `modelType`)
 
   var callParams = quote do: @[]
@@ -120,7 +120,7 @@ macro generateLookup*(modelType: type, fields: seq[string]): untyped =
 
   result[6][0][0].add(callParams)
 
-macro generateProcsForFieldLookups*(modelsAndFields: openarray[tuple[t: type, fields: seq[string]]]): untyped =
+macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tuple[t: type, fields: seq[string]]]): untyped =
   result = newStmtList()
 
   for i in modelsAndFields:
@@ -131,7 +131,7 @@ macro generateProcsForFieldLookups*(modelsAndFields: openarray[tuple[t: type, fi
 
     # Create proc skeleton
     let procDefAST = quote do:
-      proc `procName`*(db: PMApiDb): seq[`modelType`] =
+      proc `procName`*(db: `dbType`): seq[`modelType`] =
         return findRecordsBy(db.conn, `modelType`)
 
     var callParams = quote do: @[]
