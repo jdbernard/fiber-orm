@@ -200,6 +200,10 @@ proc createParseStmt*(t, value: NimNode): NimNode =
   elif t.typeKind == ntyBool:
     result = quote do: "true".startsWith(`value`.toLower)
 
+  elif t.typeKind == ntyEnum:
+    let innerType = t.getTypeInst
+    result = quote do: parseEnum[`innerType`](`value`)
+
   else:
     error "Unknown value type: " & $t.typeKind
 
