@@ -1,13 +1,15 @@
 import json, macros, options, sequtils, strutils, times, timeutils, unicode,
   uuids
 
+import nre except toSeq
+
 const UNDERSCORE_RUNE = "_".toRunes[0]
 const PG_TIMESTAMP_FORMATS = [
   "yyyy-MM-dd HH:mm:sszz",
-  "yyyy-MM-dd HH:mm:ss'.'fzz",
-  "yyyy-MM-dd HH:mm:ss'.'ffzz",
   "yyyy-MM-dd HH:mm:ss'.'fffzz"
 ]
+
+var PG_PARTIAL_FORMAT_REGEX = re"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.)(\d{1,3})(\S+)?"
 
 type
   MutateClauses* = object
@@ -69,9 +71,27 @@ type DbArrayParseState = enum
 
 proc parsePGDatetime*(val: string): DateTime =
   var errStr = ""
+
+  # Try to parse directly using known format strings.
   for df in PG_TIMESTAMP_FORMATS:
     try: return val.parse(df)
-    except: errStr &= "\n" & getCurrentExceptionMsg()
+    except: errStr &= "\n\t" & getCurrentExceptionMsg()
+
+  # PostgreSQL will truncate any trailing 0's in the millisecond value leading
+  # to values like `2020-01-01 16:42.3+00`. This cannot currently be parsed by
+  # the standard times format as it expects exactly three digits for
+  # millisecond values. So we have to detect this and pad out the millisecond
+  # value to 3 digits.
+  let match = val.match(PG_PARTIAL_FORMAT_REGEX)
+  if match.isSome:
+    let c = match.get.captures
+    try:
+      let corrected = c[0] & alignLeft(c[1], 3, '0') & c[2]
+      return corrected.parse(PG_TIMESTAMP_FORMATS[1])
+    except:
+      errStr &= "\n\t" & PG_TIMESTAMP_FORMATS[1] &
+        " after padding out milliseconds to full 3-digits"
+
   raise newException(ValueError, "Cannot parse PG date. Tried:" & errStr)
 
 proc parseDbArray*(val: string): seq[string] =
