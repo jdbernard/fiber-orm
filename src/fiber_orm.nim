@@ -50,8 +50,8 @@ template getRecord*(db: DbConn, modelType: type, id: typed): untyped =
     " FROM " & tableName(modelType) &
     " WHERE id = ?"), @[$id])
 
-  if row.allIt(it.len == 0):
-    raise newException(NotFoundError, "no record for id " & $id)
+  if allIt(row, it.len == 0):
+    raise newException(NotFoundError, "no " & modelName(modelType) & " record for id " & $id)
 
   rowToModel(modelType, row)
 
