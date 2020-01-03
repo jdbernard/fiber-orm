@@ -17,7 +17,7 @@ type
 
 # TODO: more complete implementation
 # see https://github.com/blakeembrey/pluralize
-proc pluralize(name: string): string =
+proc pluralize*(name: string): string =
   if name[^2..^1] == "ey": return name[0..^3] & "ies"
   if name[^1] == 'y': return name[0..^2] & "ies"
   return name & "s"

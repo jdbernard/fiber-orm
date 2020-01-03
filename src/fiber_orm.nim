@@ -100,7 +100,7 @@ macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untype
 
 macro generateLookup*(dbType: type, modelType: type, fields: seq[string]): untyped =
   let fieldNames = fields[1].mapIt($it)
-  let procName = ident("find" & $modelType.getType[1] & "sBy" & fieldNames.mapIt(it.capitalize).join("And"))
+  let procName = ident("find" & pluralize($modelType.getType[1]) & "By" & fieldNames.mapIt(it.capitalize).join("And"))
 
   # Create proc skeleton
   result = quote do:
