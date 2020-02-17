@@ -197,6 +197,9 @@ proc createParseStmt*(t, value: NimNode): NimNode =
   elif t.typeKind == ntyInt:
     result = quote do: parseInt(`value`)
 
+  elif t.typeKind == ntyFloat:
+    result = quote do: parseFloat(`value`)
+
   elif t.typeKind == ntyBool:
     result = quote do: "true".startsWith(`value`.toLower)
 
