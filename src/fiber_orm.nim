@@ -25,12 +25,12 @@ proc createRecord*[T](db: DbConn, rec: T): T =
     " RETURNING *"), mc.values)
 
   result = rowToModel(T, newRow)
-  
+
 proc updateRecord*[T](db: DbConn, rec: T): bool =
   var mc = newMutateClauses()
   populateMutateClauses(rec, false, mc)
 
-  let setClause = zip(mc.columns, mc.placeholders).mapIt(it.a & " = " & it.b).join(",")
+  let setClause = zip(mc.columns, mc.placeholders).mapIt(it[0] & " = " & it[1]).join(",")
   let numRowsUpdated = db.execAffectedRows(sql(
     "UPDATE " & tableName(rec) &
     " SET " & setClause &

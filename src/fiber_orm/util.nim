@@ -5,7 +5,9 @@ import nre except toSeq
 
 const UNDERSCORE_RUNE = "_".toRunes[0]
 const PG_TIMESTAMP_FORMATS = [
+  "yyyy-MM-dd HH:mm:ss",
   "yyyy-MM-dd HH:mm:sszz",
+  "yyyy-MM-dd HH:mm:ss'.'fff",
   "yyyy-MM-dd HH:mm:ss'.'fffzz"
 ]
 
@@ -278,7 +280,7 @@ proc typeOfColumn*(modelType: NimNode, colName: string): NimNode =
 
 proc isEmpty(val: int): bool = return val == 0
 proc isEmpty(val: UUID): bool = return val.isZero
-proc isEmpty(val: string): bool = return val.isNilOrWhitespace
+proc isEmpty(val: string): bool = return val.isEmptyOrWhitespace
 
 macro populateMutateClauses*(t: typed, newRecord: bool, mc: var MutateClauses): untyped =
 
