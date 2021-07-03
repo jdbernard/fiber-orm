@@ -139,7 +139,7 @@ macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tup
     # Add dynamic parameters for the proc definition and inner proc call
     for n in fieldNames:
       let paramTuple = newNimNode(nnkPar)
-      paramTuple.add(newColonExpr(ident("field"), newLit(n)))
+      paramTuple.add(newColonExpr(ident("field"), newLit(identNameToDb(n))))
       paramTuple.add(newColonExpr(ident("value"), ident(n)))
 
       procDefAST[3].add(newIdentDefs(ident(n), ident("string")))
