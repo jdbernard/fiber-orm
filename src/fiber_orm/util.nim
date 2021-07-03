@@ -3,16 +3,6 @@ import json, macros, options, sequtils, strutils, times, timeutils, unicode,
 
 import nre except toSeq
 
-const UNDERSCORE_RUNE = "_".toRunes[0]
-const PG_TIMESTAMP_FORMATS = [
-  "yyyy-MM-dd HH:mm:ss",
-  "yyyy-MM-dd HH:mm:sszz",
-  "yyyy-MM-dd HH:mm:ss'.'fff",
-  "yyyy-MM-dd HH:mm:ss'.'fffzz"
-]
-
-var PG_PARTIAL_FORMAT_REGEX = re"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.)(\d{1,3})(\S+)?"
-
 type
   MutateClauses* = object
     columns*: seq[string]
@@ -32,7 +22,9 @@ macro modelName*(model: object): string =
 macro modelName*(modelType: type): string =
   return newStrLitNode($modelType.getType[1])
 
+
 proc identNameToDb*(name: string): string =
+  const UNDERSCORE_RUNE = "_".toRunes[0]
   let nameInRunes = name.toRunes
   var prev: Rune
   var resultRunes = newSeq[Rune]()
@@ -72,6 +64,16 @@ type DbArrayParseState = enum
   expectStart, inQuote, inVal, expectEnd
 
 proc parsePGDatetime*(val: string): DateTime =
+
+  const PG_TIMESTAMP_FORMATS = [
+    "yyyy-MM-dd HH:mm:ss",
+    "yyyy-MM-dd HH:mm:sszz",
+    "yyyy-MM-dd HH:mm:ss'.'fff",
+    "yyyy-MM-dd HH:mm:ss'.'fffzz"
+  ]
+
+  let PG_PARTIAL_FORMAT_REGEX = re"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.)(\d{1,3})(\S+)?"
+
   var errStr = ""
 
   # Try to parse directly using known format strings.
