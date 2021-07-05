@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.3.1"
+version       = "0.3.2"
 author        = "Jonathan Bernard"
 description   = "Lightweight Postgres ORM for Nim."
 license       = "GPL-3.0"

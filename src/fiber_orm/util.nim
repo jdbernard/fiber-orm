@@ -90,11 +90,14 @@ proc parsePGDatetime*(val: string): DateTime =
   if match.isSome:
     let c = match.get.captures
     try:
-      let corrected = c[0] & alignLeft(c[1], 3, '0') & c[2]
-      return corrected.parse(PG_TIMESTAMP_FORMATS[1])
+      if c.toSeq.len == 2:
+        let corrected = c[0] & alignLeft(c[1], 3, '0')
+        return corrected.parse(PG_TIMESTAMP_FORMATS[2])
+      else:
+        let corrected = c[0] & alignLeft(c[1], 3, '0') & c[2]
+        return corrected.parse(PG_TIMESTAMP_FORMATS[3])
     except:
-      errStr &= "\n\t" & PG_TIMESTAMP_FORMATS[1] &
-        " after padding out milliseconds to full 3-digits"
+      errStr &= "\n\t" & getCurrentExceptionMsg()
 
   raise newException(ValueError, "Cannot parse PG date. Tried:" & errStr)
 
