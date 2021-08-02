@@ -3,6 +3,14 @@ import db_postgres, macros, options, sequtils, strutils, uuids
 from unicode import capitalize
 
 import ./fiber_orm/util
+export
+  util.columnNamesForModel,
+  util.dbFormat,
+  util.dbNameToIdent,
+  util.identNameToDb,
+  util.modelName,
+  util.rowToModel,
+  util.tableName
 
 type NotFoundError* = object of CatchableError
 
