@@ -67,37 +67,38 @@ proc parsePGDatetime*(val: string): DateTime =
 
   const PG_TIMESTAMP_FORMATS = [
     "yyyy-MM-dd HH:mm:ss",
+    "yyyy-MM-dd'T'HH:mm:ss",
     "yyyy-MM-dd HH:mm:sszz",
+    "yyyy-MM-dd'T'HH:mm:sszz",
     "yyyy-MM-dd HH:mm:ss'.'fff",
-    "yyyy-MM-dd HH:mm:ss'.'fffzz"
+    "yyyy-MM-dd'T'HH:mm:ss'.'fff",
+    "yyyy-MM-dd HH:mm:ss'.'fffzz",
+    "yyyy-MM-dd'T'HH:mm:ss'.'fffzz",
+    "yyyy-MM-dd HH:mm:ss'.'fffzzz",
+    "yyyy-MM-dd'T'HH:mm:ss'.'fffzzz",
   ]
 
-  let PG_PARTIAL_FORMAT_REGEX = re"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.)(\d{1,3})(\S+)?"
-
-  var errStr = ""
-
-  # Try to parse directly using known format strings.
-  for df in PG_TIMESTAMP_FORMATS:
-    try: return val.parse(df)
-    except: errStr &= "\n\t" & getCurrentExceptionMsg()
+  var correctedVal = val;
 
   # PostgreSQL will truncate any trailing 0's in the millisecond value leading
   # to values like `2020-01-01 16:42.3+00`. This cannot currently be parsed by
   # the standard times format as it expects exactly three digits for
   # millisecond values. So we have to detect this and pad out the millisecond
   # value to 3 digits.
+  let PG_PARTIAL_FORMAT_REGEX = re"(\d{4}-\d{2}-\d{2}( |'T')\d{2}:\d{2}:\d{2}\.)(\d{1,2})(\S+)?"
   let match = val.match(PG_PARTIAL_FORMAT_REGEX)
+
   if match.isSome:
     let c = match.get.captures
-    try:
-      if c.toSeq.len == 2:
-        let corrected = c[0] & alignLeft(c[1], 3, '0')
-        return corrected.parse(PG_TIMESTAMP_FORMATS[2])
-      else:
-        let corrected = c[0] & alignLeft(c[1], 3, '0') & c[2]
-        return corrected.parse(PG_TIMESTAMP_FORMATS[3])
-    except:
-      errStr &= "\n\t" & getCurrentExceptionMsg()
+    if c.toSeq.len == 2: correctedVal = c[0] & alignLeft(c[2], 3, '0')
+    else: correctedVal = c[0] & alignLeft(c[2], 3, '0') & c[3]
+
+  var errStr = ""
+
+  # Try to parse directly using known format strings.
+  for df in PG_TIMESTAMP_FORMATS:
+    try: return correctedVal.parse(df)
+    except: errStr &= "\n\t" & getCurrentExceptionMsg()
 
   raise newException(ValueError, "Cannot parse PG date. Tried:" & errStr)
 
