@@ -1,4 +1,5 @@
 import db_postgres, macros, options, sequtils, strutils, uuids
+import namespaced_logging
 
 from unicode import capitalize
 
@@ -14,6 +15,8 @@ export
 
 type NotFoundError* = object of CatchableError
 
+let logNs = initLoggingNamespace(name = "fiber_orm", level = lvlNotice)
+
 proc newMutateClauses(): MutateClauses =
   return MutateClauses(
     columns: @[],
@@ -26,11 +29,14 @@ proc createRecord*[T](db: DbConn, rec: T): T =
 
   # Confusingly, getRow allows inserts and updates. We use it to get back the ID
   # we want from the row.
-  let newRow = db.getRow(sql(
+  let sqlStmt =
     "INSERT INTO " & tableName(rec) &
     " (" & mc.columns.join(",") & ") " &
     " VALUES (" & mc.placeholders.join(",") & ") " &
-    " RETURNING *"), mc.values)
+    " RETURNING *"
+
+  logNs.debug "createRecord: [" & sqlStmt & "]"
+  let newRow = db.getRow(sql(sqlStmt), mc.values)
 
   result = rowToModel(T, newRow)
 
@@ -39,24 +45,34 @@ proc updateRecord*[T](db: DbConn, rec: T): bool =
   populateMutateClauses(rec, false, mc)
 
   let setClause = zip(mc.columns, mc.placeholders).mapIt(it[0] & " = " & it[1]).join(",")
-  let numRowsUpdated = db.execAffectedRows(sql(
+  let sqlStmt =
     "UPDATE " & tableName(rec) &
     " SET " & setClause &
-    " WHERE id = ? "), mc.values.concat(@[$rec.id]))
+    " WHERE id = ? "
+
+  logNs.debug "updateRecord: [" & sqlStmt & "] id: " & $rec.id
+  let numRowsUpdated = db.execAffectedRows(sql(sqlStmt), mc.values.concat(@[$rec.id]))
 
   return numRowsUpdated > 0;
 
 template deleteRecord*(db: DbConn, modelType: type, id: typed): untyped =
-  db.tryExec(sql("DELETE FROM " & tableName(modelType) & " WHERE id = ?"), $id)
+  let sqlStmt = "DELETE FROM " & tableName(modelType) & " WHERE id = ?"
+  logNs.debug "deleteRecord: [" & sqlStmt & "] id: " & $id
+  db.tryExec(sql(sqlStmt), $id)
 
 proc deleteRecord*[T](db: DbConn, rec: T): bool =
-  return db.tryExec(sql("DELETE FROM " & tableName(rec) & " WHERE id = ?"), $rec.id)
+  let sqlStmt = "DELETE FROM " & tableName(rec) & " WHERE id = ?"
+  logNs.debug "deleteRecord: [" & sqlStmt & "] id: " & $rec.id
+  return db.tryExec(sql(sqlStmt), $rec.id)
 
 template getRecord*(db: DbConn, modelType: type, id: typed): untyped =
-  let row = db.getRow(sql(
+  let sqlStmt =
     "SELECT " & columnNamesForModel(modelType).join(",") &
     " FROM " & tableName(modelType) &
-    " WHERE id = ?"), @[$id])
+    " WHERE id = ?"
+
+  logNs.debug "getRecord: [" & sqlStmt & "] id: " & $id
+  let row = db.getRow(sql(sqlStmt), @[$id])
 
   if allIt(row, it.len == 0):
     raise newException(NotFoundError, "no " & modelName(modelType) & " record for id " & $id)
@@ -64,25 +80,31 @@ template getRecord*(db: DbConn, modelType: type, id: typed): untyped =
   rowToModel(modelType, row)
 
 template findRecordsWhere*(db: DbConn, modelType: type, whereClause: string, values: varargs[string, dbFormat]): untyped =
-  db.getAllRows(sql(
+  let sqlStmt =
     "SELECT " & columnNamesForModel(modelType).join(",") &
     " FROM " & tableName(modelType) &
-    " WHERE " & whereClause), values)
-    .mapIt(rowToModel(modelType, it))
+    " WHERE " & whereClause
+
+  logNs.debug "findRecordsWhere: [" & sqlStmt & "] values: (" & values.join(", ") & ")"
+  db.getAllRows(sql(sqlStmt), values).mapIt(rowToModel(modelType, it))
 
 template getAllRecords*(db: DbConn, modelType: type): untyped =
-  db.getAllRows(sql(
+  let sqlStmt =
     "SELECT " & columnNamesForModel(modelType).join(",") &
-    " FROM " & tableName(modelType)))
-    .mapIt(rowToModel(modelType, it))
+    " FROM " & tableName(modelType)
+
+  logNs.debug "getAllRecords: [" & sqlStmt & "]"
+  db.getAllRows(sql(sqlStmt)).mapIt(rowToModel(modelType, it))
 
 template findRecordsBy*(db: DbConn, modelType: type, lookups: seq[tuple[field: string, value: string]]): untyped =
-  db.getAllRows(sql(
+  let sqlStmt =
     "SELECT " & columnNamesForModel(modelType).join(",") &
     " FROM " & tableName(modelType) &
-    " WHERE " & lookups.mapIt(it.field & " = ?").join(" AND ")),
-    lookups.mapIt(it.value))
-  .mapIt(rowToModel(modelType, it))
+    " WHERE " & lookups.mapIt(it.field & " = ?").join(" AND ")
+  let values = lookups.mapIt(it.value)
+
+  logNs.debug "findRecordsBy: [" & sqlStmt & "] values (" & values.join(", ") & ")"
+  db.getAllRows(sql(sqlStmt), values).mapIt(rowToModel(modelType, it))
 
 macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untyped =
   result = newStmtList()
