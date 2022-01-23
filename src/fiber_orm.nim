@@ -15,7 +15,11 @@ export
 
 type NotFoundError* = object of CatchableError
 
-let logNs = initLoggingNamespace(name = "fiber_orm", level = lvlNotice)
+var logNs {.threadvar.}: LoggingNamespace
+
+template log(): untyped =
+  if logNs.isNil: logNs = initLoggingNamespace(name = "fiber_orm", level = lvlDebug)
+  logNs
 
 proc newMutateClauses(): MutateClauses =
   return MutateClauses(
@@ -35,7 +39,7 @@ proc createRecord*[T](db: DbConn, rec: T): T =
     " VALUES (" & mc.placeholders.join(",") & ") " &
     " RETURNING *"
 
-  logNs.debug "createRecord: [" & sqlStmt & "]"
+  log().debug "createRecord: [" & sqlStmt & "]"
   let newRow = db.getRow(sql(sqlStmt), mc.values)
 
   result = rowToModel(T, newRow)
@@ -50,19 +54,19 @@ proc updateRecord*[T](db: DbConn, rec: T): bool =
     " SET " & setClause &
     " WHERE id = ? "
 
-  logNs.debug "updateRecord: [" & sqlStmt & "] id: " & $rec.id
+  log().debug "updateRecord: [" & sqlStmt & "] id: " & $rec.id
   let numRowsUpdated = db.execAffectedRows(sql(sqlStmt), mc.values.concat(@[$rec.id]))
 
   return numRowsUpdated > 0;
 
 template deleteRecord*(db: DbConn, modelType: type, id: typed): untyped =
   let sqlStmt = "DELETE FROM " & tableName(modelType) & " WHERE id = ?"
-  logNs.debug "deleteRecord: [" & sqlStmt & "] id: " & $id
+  log().debug "deleteRecord: [" & sqlStmt & "] id: " & $id
   db.tryExec(sql(sqlStmt), $id)
 
 proc deleteRecord*[T](db: DbConn, rec: T): bool =
   let sqlStmt = "DELETE FROM " & tableName(rec) & " WHERE id = ?"
-  logNs.debug "deleteRecord: [" & sqlStmt & "] id: " & $rec.id
+  log().debug "deleteRecord: [" & sqlStmt & "] id: " & $rec.id
   return db.tryExec(sql(sqlStmt), $rec.id)
 
 template getRecord*(db: DbConn, modelType: type, id: typed): untyped =
@@ -71,7 +75,7 @@ template getRecord*(db: DbConn, modelType: type, id: typed): untyped =
     " FROM " & tableName(modelType) &
     " WHERE id = ?"
 
-  logNs.debug "getRecord: [" & sqlStmt & "] id: " & $id
+  log().debug "getRecord: [" & sqlStmt & "] id: " & $id
   let row = db.getRow(sql(sqlStmt), @[$id])
 
   if allIt(row, it.len == 0):
@@ -85,7 +89,7 @@ template findRecordsWhere*(db: DbConn, modelType: type, whereClause: string, val
     " FROM " & tableName(modelType) &
     " WHERE " & whereClause
 
-  logNs.debug "findRecordsWhere: [" & sqlStmt & "] values: (" & values.join(", ") & ")"
+  log().debug "findRecordsWhere: [" & sqlStmt & "] values: (" & values.join(", ") & ")"
   db.getAllRows(sql(sqlStmt), values).mapIt(rowToModel(modelType, it))
 
 template getAllRecords*(db: DbConn, modelType: type): untyped =
@@ -93,7 +97,7 @@ template getAllRecords*(db: DbConn, modelType: type): untyped =
     "SELECT " & columnNamesForModel(modelType).join(",") &
     " FROM " & tableName(modelType)
 
-  logNs.debug "getAllRecords: [" & sqlStmt & "]"
+  log().debug "getAllRecords: [" & sqlStmt & "]"
   db.getAllRows(sql(sqlStmt)).mapIt(rowToModel(modelType, it))
 
 template findRecordsBy*(db: DbConn, modelType: type, lookups: seq[tuple[field: string, value: string]]): untyped =
@@ -103,7 +107,7 @@ template findRecordsBy*(db: DbConn, modelType: type, lookups: seq[tuple[field: s
     " WHERE " & lookups.mapIt(it.field & " = ?").join(" AND ")
   let values = lookups.mapIt(it.value)
 
-  logNs.debug "findRecordsBy: [" & sqlStmt & "] values (" & values.join(", ") & ")"
+  log().debug "findRecordsBy: [" & sqlStmt & "] values (" & values.join(", ") & ")"
   db.getAllRows(sql(sqlStmt), values).mapIt(rowToModel(modelType, it))
 
 macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untyped =
