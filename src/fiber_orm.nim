@@ -1,10 +1,13 @@
-import db_postgres, macros, options, sequtils, strutils, uuids
-import namespaced_logging
+import std/db_postgres, std/macros, std/options, std/sequtils, std/strutils
+import namespaced_logging, uuids
 
-from unicode import capitalize
+from std/unicode import capitalize
 
+import ./fiber_orm/pool
 import ./fiber_orm/util
+
 export
+  pool,
   util.columnNamesForModel,
   util.dbFormat,
   util.dbNameToIdent,
@@ -18,7 +21,7 @@ type NotFoundError* = object of CatchableError
 var logNs {.threadvar.}: LoggingNamespace
 
 template log(): untyped =
-  if logNs.isNil: logNs = initLoggingNamespace(name = "fiber_orm", level = lvlDebug)
+  if logNs.isNil: logNs = initLoggingNamespace(name = "fiber_orm", level = lvlNotice)
   logNs
 
 proc newMutateClauses(): MutateClauses =
@@ -123,14 +126,27 @@ macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untype
     let deleteName = ident("delete" & modelName)
     let idType = typeOfColumn(t, "id")
     result.add quote do:
-      proc `getName`*(db: `dbType`, id: `idType`): `t` = getRecord(db.conn, `t`, id)
-      proc `getAllName`*(db: `dbType`): seq[`t`] = getAllRecords(db.conn, `t`)
+      proc `getName`*(db: `dbType`, id: `idType`): `t` =
+        db.withConn: result = getRecord(conn, `t`, id)
+
+      proc `getAllName`*(db: `dbType`): seq[`t`] =
+        db.withConn: result = getAllRecords(conn, `t`)
+
       proc `findWhereName`*(db: `dbType`, whereClause: string, values: varargs[string, dbFormat]): seq[`t`] =
-        return findRecordsWhere(db.conn, `t`, whereClause, values)
-      proc `createName`*(db: `dbType`, rec: `t`): `t` = createRecord(db.conn, rec)
-      proc `updateName`*(db: `dbType`, rec: `t`): bool = updateRecord(db.conn, rec)
-      proc `deleteName`*(db: `dbType`, rec: `t`): bool = deleteRecord(db.conn, rec)
-      proc `deleteName`*(db: `dbType`, id: `idType`): bool = deleteRecord(db.conn, `t`, id)
+        db.withConn:
+          result = findRecordsWhere(conn, `t`, whereClause, values)
+
+      proc `createName`*(db: `dbType`, rec: `t`): `t` =
+        db.withConn: result = createRecord(conn, rec)
+
+      proc `updateName`*(db: `dbType`, rec: `t`): bool =
+        db.withConn: result = updateRecord(conn, rec)
+
+      proc `deleteName`*(db: `dbType`, rec: `t`): bool =
+        db.withConn: result = deleteRecord(conn, rec)
+
+      proc `deleteName`*(db: `dbType`, id: `idType`): bool =
+        db.withConn: result = deleteRecord(conn, `t`, id)
 
 macro generateLookup*(dbType: type, modelType: type, fields: seq[string]): untyped =
   let fieldNames = fields[1].mapIt($it)
@@ -139,7 +155,7 @@ macro generateLookup*(dbType: type, modelType: type, fields: seq[string]): untyp
   # Create proc skeleton
   result = quote do:
     proc `procName`*(db: `dbType`): seq[`modelType`] =
-      return findRecordsBy(db.conn, `modelType`)
+      db.withConn: result = findRecordsBy(conn, `modelType`)
 
   var callParams = quote do: @[]
 
@@ -149,10 +165,19 @@ macro generateLookup*(dbType: type, modelType: type, fields: seq[string]): untyp
     paramTuple.add(newColonExpr(ident("field"), newLit(identNameToDb(n))))
     paramTuple.add(newColonExpr(ident("value"), ident(n)))
 
+    # Add the parameter to the outer call (the generated proc)
+    # result[3] is ProcDef -> [3]: FormalParams
     result[3].add(newIdentDefs(ident(n), ident("string")))
+
+    # Build up the AST for the inner procedure call
     callParams[1].add(paramTuple)
 
-  result[6][0][0].add(callParams)
+  # Add the call params to the inner procedure call
+  # result[6][0][1][0][1] is
+  #   ProcDef -> [6]: StmtList (body) -> [0]: Call ->
+  #     [1]: StmtList (withConn body) -> [0]: Asgn (result =) ->
+  #     [1]: Call (inner findRecords invocation)
+  result[6][0][1][0][1].add(callParams)
 
 macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tuple[t: type, fields: seq[string]]]): untyped =
   result = newStmtList()
@@ -166,7 +191,7 @@ macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tup
     # Create proc skeleton
     let procDefAST = quote do:
       proc `procName`*(db: `dbType`): seq[`modelType`] =
-        return findRecordsBy(db.conn, `modelType`)
+        db.withConn: result = findRecordsBy(conn, `modelType`)
 
     var callParams = quote do: @[]
 
@@ -179,6 +204,28 @@ macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tup
       procDefAST[3].add(newIdentDefs(ident(n), ident("string")))
       callParams[1].add(paramTuple)
 
-    procDefAST[6][0][0].add(callParams)
+    procDefAST[6][0][1][0][1].add(callParams)
 
     result.add procDefAST
+
+proc initPool*(
+    connect: proc(): DbConn,
+    poolSize = 10,
+    hardCap = false,
+    healthCheckQuery = "SELECT 'true' AS alive"): DbConnPool =
+
+  initDbConnPool(DbConnPoolConfig(
+    connect: connect,
+    poolSize: poolSize,
+    hardCap: hardCap,
+    healthCheckQuery: healthCheckQuery))
+
+template inTransaction*(db: DbConnPool, body: untyped) =
+  pool.withConn(db):
+    conn.exec(sql"BEGIN TRANSACTION")
+    try:
+      body
+      conn.exec(sql"COMMIT")
+    except:
+      conn.exec(sql"ROLLBACK")
+      raise getCurrentException()
