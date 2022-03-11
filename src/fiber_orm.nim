@@ -34,13 +34,11 @@ proc createRecord*[T](db: DbConn, rec: T): T =
   var mc = newMutateClauses()
   populateMutateClauses(rec, true, mc)
 
-  # Confusingly, getRow allows inserts and updates. We use it to get back the ID
-  # we want from the row.
   let sqlStmt =
     "INSERT INTO " & tableName(rec) &
     " (" & mc.columns.join(",") & ") " &
     " VALUES (" & mc.placeholders.join(",") & ") " &
-    " RETURNING *"
+    " RETURNING " & columnNamesForModel(rec).join(",")
 
   log().debug "createRecord: [" & sqlStmt & "]"
   let newRow = db.getRow(sql(sqlStmt), mc.values)
