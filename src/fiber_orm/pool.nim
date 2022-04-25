@@ -93,5 +93,5 @@ proc release*(pool: DbConnPool, connId: int): void =
 
 template withConn*(pool: DbConnPool, stmt: untyped): untyped =
   let (connId, conn {.inject.}) = take(pool)
-  stmt
-  release(pool, connId)
+  try: stmt
+  finally: release(pool, connId)
