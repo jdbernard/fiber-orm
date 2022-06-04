@@ -62,14 +62,16 @@ proc maintain(pool: DbConnPool): void =
   let freeConns = pool.conns.filterIt(it.free)
   if pool.conns.len > pool.cfg.poolSize and freeConns.len > 0:
     let numToCull = min(freeConns.len, pool.conns.len - pool.cfg.poolSize)
-    let toCull = freeConns[0..numToCull]
-    pool.conns.keepIf((pc) => toCull.allIt(it.id != pc.id))
-    for culled in toCull:
-      try: culled.conn.close()
-      except: discard ""
-    log().debug(
-      "Trimming pool size. Culled $# free connections. $# connections remaining." %
-      [$toCull.len, $pool.conns.len])
+
+    if numToCull > 0:
+      let toCull = freeConns[0..numToCull]
+      pool.conns.keepIf((pc) => toCull.allIt(it.id != pc.id))
+      for culled in toCull:
+        try: culled.conn.close()
+        except: discard ""
+      log().debug(
+        "Trimming pool size. Culled $# free connections. $# connections remaining." %
+        [$toCull.len, $pool.conns.len])
 
 proc take*(pool: DbConnPool): tuple[id: int, conn: DbConn] =
   pool.maintain
