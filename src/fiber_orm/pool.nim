@@ -1,3 +1,9 @@
+# Fiber ORM
+#
+# Copyright 2019 Jonathan Bernard <jonathan@jdbernard.com>
+
+## Simple database connection pooling implementation compatible with Fiber ORM.
+
 import std/db_postgres, std/sequtils, std/strutils, std/sugar
 
 import namespaced_logging
@@ -5,10 +11,21 @@ import namespaced_logging
 
 type
   DbConnPoolConfig* = object
-    connect*: () -> DbConn
-    poolSize*: int
-    hardCap*: bool
-    healthCheckQuery*: string
+    connect*: () -> DbConn  ## Factory procedure to create a new DBConn
+    poolSize*: int ## The pool capacity.
+    hardCap*: bool ## Is the pool capacity a hard cap?
+                   ##
+                   ## When `false`, the pool can grow beyond the configured
+                   ## capacity, but will release connections down to the its
+                   ## capacity (no less than `poolSize`).
+                   ##
+                   ## When `true` the pool will not create more than its
+                   ## configured capacity.  It a connection is requested, none
+                   ## are free, and the pool is at capacity, this will result
+                   ## in an Error being raised.
+    healthCheckQuery*: string ## Should be a simple and fast SQL query that the
+                              ## pool can use to test the liveliness of pooled
+                              ## connections.
 
   PooledDbConn = ref object
     conn: DbConn
@@ -16,6 +33,7 @@ type
     free: bool
 
   DbConnPool* = ref object
+    ## Database connection pool
     conns: seq[PooledDbConn]
     cfg: DbConnPoolConfig
     lastId: int
@@ -74,6 +92,13 @@ proc maintain(pool: DbConnPool): void =
         [$toCull.len, $pool.conns.len])
 
 proc take*(pool: DbConnPool): tuple[id: int, conn: DbConn] =
+  ## Request a connection from the pool. Returns a DbConn if the pool has free
+  ## connections, or if it has the capacity to create a new connection. If the
+  ## pool is configured with a hard capacity limit and is out of free
+  ## connections, this will raise an Error.
+  ##
+  ## Connections taken must be returned via `release` when the caller is
+  ## finished using them in order for them to be released back to the pool.
   pool.maintain
   let freeConns = pool.conns.filterIt(it.free)
 
@@ -89,11 +114,17 @@ proc take*(pool: DbConnPool): tuple[id: int, conn: DbConn] =
   return (id: reserved.id, conn: reserved.conn)
 
 proc release*(pool: DbConnPool, connId: int): void =
+  ## Release a connection back to the pool.
   log().debug("Reclaiming released connaction $#" % [$connId])
   let foundConn = pool.conns.filterIt(it.id == connId)
   if foundConn.len > 0: foundConn[0].free = true
 
 template withConn*(pool: DbConnPool, stmt: untyped): untyped =
+  ## Convenience template to provide a connection from the pool for use in a
+  ## statement block, automatically releasing that connnection when done.
+  ##
+  ## The provided connection is injected as the variable `conn` in the
+  ## statement body.
   let (connId, conn {.inject.}) = take(pool)
   try: stmt
   finally: release(pool, connId)

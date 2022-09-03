@@ -1,3 +1,8 @@
+# Fiber ORM
+#
+# Copyright 2019 Jonathan Bernard <jonathan@jdbernard.com>
+
+## Utility methods used internally by Fiber ORM.
 import json, macros, options, sequtils, strutils, times, timeutils, unicode,
   uuids
 
@@ -5,6 +10,10 @@ import nre except toSeq
 
 type
   MutateClauses* = object
+    ## Data structure to hold information about the clauses that should be
+    ## added to a query. How these clauses are used will depend on the query.
+    ## This common data structure provides the information needed to create
+    ## WHERE clauses, UPDATE clauses, etc.
     columns*: seq[string]
     placeholders*: seq[string]
     values*: seq[string]
@@ -12,18 +21,23 @@ type
 # TODO: more complete implementation
 # see https://github.com/blakeembrey/pluralize
 proc pluralize*(name: string): string =
+  ## Return the plural form of the given name.
   if name[^2..^1] == "ey": return name[0..^3] & "ies"
   if name[^1] == 'y': return name[0..^2] & "ies"
   return name & "s"
 
 macro modelName*(model: object): string =
+  ## For a given concrete record object, return the name of the `model class`_
   return newStrLitNode($model.getTypeInst)
 
 macro modelName*(modelType: type): string =
+  ## Get the name of a given `model class`_
   return newStrLitNode($modelType.getType[1])
 
-
 proc identNameToDb*(name: string): string =
+  ## Map a Nim identifier name to a DB name. See the `rules for name mapping`_
+  ##
+  ## TODO link above
   const UNDERSCORE_RUNE = "_".toRunes[0]
   let nameInRunes = name.toRunes
   var prev: Rune
@@ -42,28 +56,40 @@ proc identNameToDb*(name: string): string =
   return $resultRunes
 
 proc dbNameToIdent*(name: string): string =
+  ## Map a DB name to a Nim identifier name. See the `rules for name mapping`_
   let parts = name.split("_")
   return @[parts[0]].concat(parts[1..^1].mapIt(capitalize(it))).join("")
 
 proc tableName*(modelType: type): string =
+  ## Get the `table name`_ for a given `model class`_
   return pluralize(modelName(modelType).identNameToDb)
 
 proc tableName*[T](rec: T): string =
+  ## Get the `table name`_ for a given record.
   return pluralize(modelName(rec).identNameToDb)
 
-proc dbFormat*(s: string): string = return s
+proc dbFormat*(s: string): string =
+  ## Format a string for inclusion in a SQL Query.
+  return s
 
-proc dbFormat*(dt: DateTime): string = return dt.formatIso8601
+proc dbFormat*(dt: DateTime): string =
+  ## Format a DateTime for inclusion in a SQL Query.
+  return dt.formatIso8601
 
 proc dbFormat*[T](list: seq[T]): string =
+  ## Format a `seq` for inclusion in a SQL Query.
   return "{" & list.mapIt(dbFormat(it)).join(",") & "}"
 
-proc dbFormat*[T](item: T): string = return $item
+proc dbFormat*[T](item: T): string =
+  ## For all other types, fall back on a defined `$` function to create a
+  ## string version of the value we can include in an SQL query>
+  return $item
 
 type DbArrayParseState = enum
   expectStart, inQuote, inVal, expectEnd
 
 proc parsePGDatetime*(val: string): DateTime =
+  ## Parse a Postgres datetime value into a Nim DateTime object.
 
   const PG_TIMESTAMP_FORMATS = [
     "yyyy-MM-dd HH:mm:ss",
@@ -103,6 +129,7 @@ proc parsePGDatetime*(val: string): DateTime =
   raise newException(ValueError, "Cannot parse PG date. Tried:" & errStr)
 
 proc parseDbArray*(val: string): seq[string] =
+  ## Parse a Postgres array column into a Nim seq[string]
   result = newSeq[string]()
 
   var parseState = DbArrayParseState.expectStart
@@ -161,6 +188,9 @@ proc parseDbArray*(val: string): seq[string] =
     result.add(curStr)
 
 proc createParseStmt*(t, value: NimNode): NimNode =
+  ## Utility method to create the Nim cod required to parse a value coming from
+  ## the a database query. This is used by functions like `rowToModel` to parse
+  ## the dataabase columns into the Nim object fields.
 
   #echo "Creating parse statment for ", t.treeRepr
   if t.typeKind == ntyObject:
@@ -219,6 +249,9 @@ proc createParseStmt*(t, value: NimNode): NimNode =
     error "Unknown value type: " & $t.typeKind
 
 template walkFieldDefs*(t: NimNode, body: untyped) =
+  ## Iterate over every field of the given Nim object, yielding and defining
+  ## `fieldIdent` and `fieldType`, the name of the field as a Nim Ident node
+  ## and the type of the field as a Nim Type node respectively.
   let tTypeImpl = t.getTypeImpl
 
   var nodeToItr: NimNode
@@ -239,6 +272,8 @@ template walkFieldDefs*(t: NimNode, body: untyped) =
       body
 
 macro columnNamesForModel*(modelType: typed): seq[string] =
+  ## Return the column names corresponding to the the fields of the given
+  ## `model class`_
   var columnNames = newSeq[string]()
 
   modelType.walkFieldDefs:
@@ -247,6 +282,8 @@ macro columnNamesForModel*(modelType: typed): seq[string] =
   result = newLit(columnNames)
 
 macro rowToModel*(modelType: typed, row: seq[string]): untyped =
+  ## Return a new Nim model object of type `modelType` populated with the
+  ## values returned in the given database `row`
 
   # Create the object constructor AST node
   result = newNimNode(nnkObjConstr).add(modelType)
@@ -269,6 +306,7 @@ macro listFields*(t: typed): untyped =
   result = newLit(fields)
 
 proc typeOfColumn*(modelType: NimNode, colName: string): NimNode =
+  ## Given a model type and a column name, return the Nim type for that column.
   modelType.walkFieldDefs:
     if $fieldIdent != colName: continue
 
@@ -289,6 +327,8 @@ proc isEmpty(val: UUID): bool = return val.isZero
 proc isEmpty(val: string): bool = return val.isEmptyOrWhitespace
 
 macro populateMutateClauses*(t: typed, newRecord: bool, mc: var MutateClauses): untyped =
+  ## Given a record type, create the datastructure used to generate SQL clauses
+  ## for the fields of this record type.
 
   result = newStmtList()
 
@@ -326,3 +366,7 @@ macro populateMutateClauses*(t: typed, newRecord: bool, mc: var MutateClauses): 
           `mc`.columns.add(identNameToDb(`fieldName`))
           `mc`.placeholders.add("?")
           `mc`.values.add(dbFormat(`t`.`fieldIdent`))
+
+## .. _model class: ../fiber_orm.html#objectminusrelational-modeling-model-class
+## .. _rules for name mapping: ../fiber_orm.html
+## .. _table name: ../fiber_orm.html
