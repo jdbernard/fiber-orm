@@ -1,0 +1,25 @@
+NotFoundError	fiber_orm.html#NotFoundError	fiber_orm: NotFoundError	
+createRecord	fiber_orm.html#createRecord,DbConn,T	fiber_orm: createRecord[T](db: DbConn; rec: T): T	
+updateRecord	fiber_orm.html#updateRecord,DbConn,T	fiber_orm: updateRecord[T](db: DbConn; rec: T): bool	
+deleteRecord	fiber_orm.html#deleteRecord.t,DbConn,type,typed	fiber_orm: deleteRecord(db: DbConn; modelType: type; id: typed): untyped	
+deleteRecord	fiber_orm.html#deleteRecord,DbConn,T	fiber_orm: deleteRecord[T](db: DbConn; rec: T): bool	
+getRecord	fiber_orm.html#getRecord.t,DbConn,type,typed	fiber_orm: getRecord(db: DbConn; modelType: type; id: typed): untyped	
+findRecordsWhere	fiber_orm.html#findRecordsWhere.t,DbConn,type,string,varargs[string,dbFormat]	fiber_orm: findRecordsWhere(db: DbConn; modelType: type; whereClause: string;\n                 values: varargs[string, dbFormat]): untyped	
+getAllRecords	fiber_orm.html#getAllRecords.t,DbConn,type	fiber_orm: getAllRecords(db: DbConn; modelType: type): untyped	
+findRecordsBy	fiber_orm.html#findRecordsBy.t,DbConn,type,seq[tuple[string,string]]	fiber_orm: findRecordsBy(db: DbConn; modelType: type;\n              lookups: seq[tuple[field: string, value: string]]): untyped	
+generateProcsForModels	fiber_orm.html#generateProcsForModels.m,type,openArray[type]	fiber_orm: generateProcsForModels(dbType: type; modelTypes: openArray[type]): untyped	
+generateLookup	fiber_orm.html#generateLookup.m,type,type,seq[string]	fiber_orm: generateLookup(dbType: type; modelType: type; fields: seq[string]): untyped	
+generateProcsForFieldLookups	fiber_orm.html#generateProcsForFieldLookups.m,type,openArray[tuple[type,seq[string]]]	fiber_orm: generateProcsForFieldLookups(dbType: type; modelsAndFields: openArray[\n    tuple[t: type, fields: seq[string]]]): untyped	
+initPool	fiber_orm.html#initPool,proc),int,string	fiber_orm: initPool(connect: proc (): DbConn; poolSize = 10; hardCap = false;\n         healthCheckQuery = &quot;SELECT \&apos;true\&apos; AS alive&quot;): DbConnPool	
+inTransaction	fiber_orm.html#inTransaction.t,DbConnPool,untyped	fiber_orm: inTransaction(db: DbConnPool; body: untyped)	
+Basic Usage	fiber_orm.html#basic-usage	 Basic Usage	
+Example DB Schema	fiber_orm.html#basic-usage-example-db-schema	  Example DB Schema	
+Example Model Definitions	fiber_orm.html#basic-usage-example-model-definitions	  Example Model Definitions	
+Example Fiber ORM Usage	fiber_orm.html#basic-usage-example-fiber-orm-usage	  Example Fiber ORM Usage	
+Object-Relational Modeling	fiber_orm.html#objectminusrelational-modeling	 Object-Relational Modeling	
+Model Class	fiber_orm.html#objectminusrelational-modeling-model-class	  Model Class	
+Name Mapping	fiber_orm.html#model-class-name-mapping	   Name Mapping	
+ID Field	fiber_orm.html#model-class-id-field	   ID Field	
+Supported Data Types	fiber_orm.html#objectminusrelational-modeling-supported-data-types	  Supported Data Types	
+Database Object	fiber_orm.html#database-object	 Database Object	
+See Also	fiber_orm.html#see-also	 See Also	

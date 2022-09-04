@@ -1,0 +1,21 @@
+MutateClauses	fiber_orm/util.html#MutateClauses	util: MutateClauses	
+pluralize	fiber_orm/util.html#pluralize,string	util: pluralize(name: string): string	
+modelName	fiber_orm/util.html#modelName.m	util: modelName(model: object): string	
+modelName	fiber_orm/util.html#modelName.m,type	util: modelName(modelType: type): string	
+identNameToDb	fiber_orm/util.html#identNameToDb,string	util: identNameToDb(name: string): string	
+dbNameToIdent	fiber_orm/util.html#dbNameToIdent,string	util: dbNameToIdent(name: string): string	
+tableName	fiber_orm/util.html#tableName,type	util: tableName(modelType: type): string	
+tableName	fiber_orm/util.html#tableName,T	util: tableName[T](rec: T): string	
+dbFormat	fiber_orm/util.html#dbFormat,string	util: dbFormat(s: string): string	
+dbFormat	fiber_orm/util.html#dbFormat,DateTime	util: dbFormat(dt: DateTime): string	
+dbFormat	fiber_orm/util.html#dbFormat,seq[T]	util: dbFormat[T](list: seq[T]): string	
+dbFormat	fiber_orm/util.html#dbFormat,T	util: dbFormat[T](item: T): string	
+parsePGDatetime	fiber_orm/util.html#parsePGDatetime,string	util: parsePGDatetime(val: string): DateTime	
+parseDbArray	fiber_orm/util.html#parseDbArray,string	util: parseDbArray(val: string): seq[string]	
+createParseStmt	fiber_orm/util.html#createParseStmt,NimNode,NimNode	util: createParseStmt(t, value: NimNode): NimNode	
+walkFieldDefs	fiber_orm/util.html#walkFieldDefs.t,NimNode,untyped	util: walkFieldDefs(t: NimNode; body: untyped)	
+columnNamesForModel	fiber_orm/util.html#columnNamesForModel.m,typed	util: columnNamesForModel(modelType: typed): seq[string]	
+rowToModel	fiber_orm/util.html#rowToModel.m,typed,seq[string]	util: rowToModel(modelType: typed; row: seq[string]): untyped	
+listFields	fiber_orm/util.html#listFields.m,typed	util: listFields(t: typed): untyped	
+typeOfColumn	fiber_orm/util.html#typeOfColumn,NimNode,string	util: typeOfColumn(modelType: NimNode; colName: string): NimNode	
+populateMutateClauses	fiber_orm/util.html#populateMutateClauses.m,typed,bool,MutateClauses	util: populateMutateClauses(t: typed; newRecord: bool; mc: var MutateClauses): untyped	

@@ -25,7 +25,12 @@
 ## ===========
 ##
 ## Consider a simple TODO list application that keeps track of TODO items as
-## well as time logged against those items. You might have a schema such as:
+## well as time logged against those items.
+##
+## Example DB Schema
+## -----------------
+##
+## You might have a schema such as:
 ##
 ## .. code-block:: SQL
 ##    create extension if not exists "pgcrypto";
@@ -45,6 +50,9 @@
 ##      start timestamp with timezone not null default current_timestamp,
 ##      stop timestamp with timezone default null,
 ##    );
+##
+## Example Model Definitions
+## -------------------------
 ##
 ## Models may be defined as:
 ##
@@ -68,6 +76,9 @@
 ##        start*: DateTime
 ##        stop*: Option[DateTime]
 ##
+## Example Fiber ORM Usage
+## -----------------------
+##
 ## Using Fiber ORM we can generate a data access layer with:
 ##
 ## .. code-block:: Nim
@@ -78,8 +89,11 @@
 ##    type TodoDB* = DbConnPool
 ##
 ##    proc initDb*(connString: string): TodoDB =
-##      fiber_orm.initPool(connect =
-##        proc(): DbConn = open("", "", "", connString))
+##      result = fiber_orm.initPool(
+##        connect = proc(): DbConn = open("", "", "", connString),
+##        poolSize = 20,
+##        hardCap = false)
+##
 ##
 ##    generateProcsForModels(TodoDB, [TodoItem, TimeEntry])
 ##
@@ -163,6 +177,35 @@
 ## generate an ID when a new record is inserted. If a non-zero value is
 ## provided, the create call will include the `id` field in the `INSERT` query.
 ##
+## For example, to allow the database to create the id:
+##
+## .. code-block:: Nim
+##    let item = TodoItem(
+##      owner: "John Mann",
+##      summary: "Create a grocery list.",
+##      details: none[string](),
+##      priority: 0,
+##      relatedTodoItemIds: @[])
+##
+##    let itemWithId = db.createTodoItem(item)
+##    echo $itemWithId.id # generated in the database
+##
+## And to create it in code:
+##
+## .. code-block:: Nim
+##    import uuids
+##
+##    let item = TodoItem(
+##      id: genUUID(),
+##      owner: "John Mann",
+##      summary: "Create a grocery list.",
+##      details: none[string](),
+##      priority: 0,
+##      relatedTodoItemIds: @[])
+##
+##    let itemInDb = db.createTodoItem(item)
+##    echo $itemInDb.id # will be the same as what was provided
+##
 ## .. _Option.isNone: https://nim-lang.org/docs/options.html#isNone,Option[T]
 ## .. _UUID.isZero: https://github.com/pragmagic/uuids/blob/8cb8720b567c6bcb261bd1c0f7491bdb5209ad06/uuids.nim#L72
 ##
@@ -206,7 +249,30 @@
 ##
 ## Database Object
 ## ===============
-
+##
+## Many of the Fiber ORM macros expect a database object type to be passed.
+## In the example above the `pool.DbConnPool`_ object is used as database
+## object type (aliased as `TodoDB`). This is the intended usage pattern, but
+## anything can be passed as the database object type so long as there is a
+## defined `withConn` template that provides an injected `conn: DbConn` object
+## to the provided statement body.
+##
+## For example, a valid database object implementation that opens a new
+## connection for every request might look like this:
+##
+## .. code-block:: Nim
+##    import std/db_postgres
+##
+##    type TodoDB* = object
+##      connString: string
+##
+##    template withConn*(db: TodoDB, stmt: untyped): untyped =
+##      let conn {.inject.} = open("", "", "", db.connString)
+##      try: stmt
+##      finally: close(conn)
+##
+## .. _pool.DbConnPool: fiber_orm/pool.html#DbConnPool
+##
 import std/db_postgres, std/macros, std/options, std/sequtils, std/strutils
 import namespaced_logging, uuids
 
@@ -241,14 +307,13 @@ proc newMutateClauses(): MutateClauses =
     values: @[])
 
 proc createRecord*[T](db: DbConn, rec: T): T =
-  ## Create a new record. `rec` is expected to be a `model class`_. The `id
-  ## field`_ is only set if it is `non-empty`_
+  ## Create a new record. `rec` is expected to be a `model class`_. The `id`
+  ## field is only set if it is non-empty (see `ID Field`_ for details).
   ##
   ## Returns the newly created record.
   ##
   ## .. _model class: #objectminusrelational-modeling-model-class
-  ## .. _id field: #model-class-id-field
-  ## .. _non-empty:
+  ## .. _ID Field: #model-class-id-field
 
   var mc = newMutateClauses()
   populateMutateClauses(rec, true, mc)
@@ -266,8 +331,6 @@ proc createRecord*[T](db: DbConn, rec: T): T =
 
 proc updateRecord*[T](db: DbConn, rec: T): bool =
   ## Update a record by id. `rec` is expected to be a `model class`_.
-  ##
-  ## .. _model class: #objectminusrelational-modeling-model-class
   var mc = newMutateClauses()
   populateMutateClauses(rec, false, mc)
 
@@ -359,8 +422,10 @@ macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untype
   ##    proc findTodoItemsWhere*(
   ##      db: TodoDB, whereClause: string, values: varargs[string]): TodoItem;
   ##
-  ## `dbType` is expected to be some type that has a defined `withConn`_
-  ## procedure.
+  ## `dbType` is expected to be some type that has a defined `withConn`
+  ## procedure (see `Database Object`_ for details).
+  ##
+  ## .. _Database Object: #database-object
   result = newStmtList()
 
   for t in modelTypes:
@@ -471,12 +536,12 @@ proc initPool*(
     poolSize = 10,
     hardCap = false,
     healthCheckQuery = "SELECT 'true' AS alive"): DbConnPool =
-  ## Initialize a new DbConnPool.
+  ## Initialize a new DbConnPool. See the `initDb` procedure in the `Example
+  ## Fiber ORM Usage`_ for an example
   ##
-  ## * `connect` must be a factory which creates a new `DbConn`
+  ## * `connect` must be a factory which creates a new `DbConn`.
   ## * `poolSize` sets the desired capacity of the connection pool.
   ## * `hardCap` defaults to `false`.
-  ##
   ##   When `false`, the pool can grow beyond the configured capacity, but will
   ##   release connections down to the its capacity (no less than `poolSize`).
   ##
@@ -485,6 +550,8 @@ proc initPool*(
   ##   capacity, this will result in an Error being raised.
   ## * `healthCheckQuery` should be a simple and fast SQL query that the pool
   ##   can use to test the liveliness of pooled connections.
+  ##
+  ## .. _Example Fiber ORM Usage: #basic-usage-example-fiber-orm-usage
 
   initDbConnPool(DbConnPoolConfig(
     connect: connect,

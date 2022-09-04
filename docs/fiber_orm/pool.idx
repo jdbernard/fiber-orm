@@ -1,0 +1,6 @@
+DbConnPoolConfig	fiber_orm/pool.html#DbConnPoolConfig	pool: DbConnPoolConfig	
+DbConnPool	fiber_orm/pool.html#DbConnPool	pool: DbConnPool	
+initDbConnPool	fiber_orm/pool.html#initDbConnPool,DbConnPoolConfig	pool: initDbConnPool(cfg: DbConnPoolConfig): DbConnPool	
+take	fiber_orm/pool.html#take,DbConnPool	pool: take(pool: DbConnPool): tuple[id: int, conn: DbConn]	
+release	fiber_orm/pool.html#release,DbConnPool,int	pool: release(pool: DbConnPool; connId: int): void	
+withConn	fiber_orm/pool.html#withConn.t,DbConnPool,untyped	pool: withConn(pool: DbConnPool; stmt: untyped): untyped	
