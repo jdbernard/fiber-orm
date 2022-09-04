@@ -325,6 +325,7 @@ proc typeOfColumn*(modelType: NimNode, colName: string): NimNode =
 proc isEmpty(val: int): bool = return val == 0
 proc isEmpty(val: UUID): bool = return val.isZero
 proc isEmpty(val: string): bool = return val.isEmptyOrWhitespace
+proc isEmpty[T](val: Option[T]): bool = return val.isNone
 
 macro populateMutateClauses*(t: typed, newRecord: bool, mc: var MutateClauses): untyped =
   ## Given a record type, create the datastructure used to generate SQL clauses
