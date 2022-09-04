@@ -24,7 +24,12 @@ Basic Usage
 ===========
 
 Consider a simple TODO list application that keeps track of TODO items as
-well as time logged against those items. You might have a schema such as:
+well as time logged against those items.
+
+Example DB Schema
+-----------------
+
+You might have a schema such as:
 
 .. code-block:: SQL
    create extension if not exists "pgcrypto";
@@ -44,6 +49,9 @@ well as time logged against those items. You might have a schema such as:
      start timestamp with timezone not null default current_timestamp,
      stop timestamp with timezone default null,
    );
+
+Example Model Definitions
+-------------------------
 
 Models may be defined as:
 
@@ -67,6 +75,9 @@ Models may be defined as:
        start*: DateTime
        stop*: Option[DateTime]
 
+Example Fiber ORM Usage
+-----------------------
+
 Using Fiber ORM we can generate a data access layer with:
 
 .. code-block:: Nim
@@ -77,8 +88,11 @@ Using Fiber ORM we can generate a data access layer with:
    type TodoDB* = DbConnPool
 
    proc initDb*(connString: string): TodoDB =
-     fiber_orm.initPool(connect =
-       proc(): DbConn = open("", "", "", connString))
+     result = fiber_orm.initPool(
+       connect = proc(): DbConn = open("", "", "", connString),
+       poolSize = 20,
+       hardCap = false)
+
 
    generateProcsForModels(TodoDB, [TodoItem, TimeEntry])
 
@@ -162,6 +176,35 @@ is intended to allow for cases like the example where the database may
 generate an ID when a new record is inserted. If a non-zero value is
 provided, the create call will include the `id` field in the `INSERT` query.
 
+For example, to allow the database to create the id:
+
+.. code-block:: Nim
+   let item = TodoItem(
+     owner: "John Mann",
+     summary: "Create a grocery list.",
+     details: none[string](),
+     priority: 0,
+     relatedTodoItemIds: @[])
+
+   let itemWithId = db.createTodoItem(item)
+   echo $itemWithId.id # generated in the database
+
+And to create it in code:
+
+.. code-block:: Nim
+   import uuids
+
+   let item = TodoItem(
+     id: genUUID(),
+     owner: "John Mann",
+     summary: "Create a grocery list.",
+     details: none[string](),
+     priority: 0,
+     relatedTodoItemIds: @[])
+
+   let itemInDb = db.createTodoItem(item)
+   echo $itemInDb.id # will be the same as what was provided
+
 .. _Option.isNone: https://nim-lang.org/docs/options.html#isNone,Option[T]
 .. _UUID.isZero: https://github.com/pragmagic/uuids/blob/8cb8720b567c6bcb261bd1c0f7491bdb5209ad06/uuids.nim#L72
 
@@ -207,7 +250,7 @@ Database Object
 ===============
 
 Many of the Fiber ORM macros expect a database object type to be passed.
-In the example above the `fiber_orm.DbConnPool`_ object is used as database
+In the example above the `pool.DbConnPool`_ object is used as database
 object type (aliased as `TodoDB`). This is the intended usage pattern, but
 anything can be passed as the database object type so long as there is a
 defined `withConn` template that provides an injected `conn: DbConn` object
@@ -226,3 +269,5 @@ connection for every request might look like this:
      let conn {.inject.} = open("", "", "", db.connString)
      try: stmt
      finally: close(conn)
+
+.. _pool.DbConnPool: fiber_orm/pool.html#DbConnPool
