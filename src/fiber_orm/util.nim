@@ -3,7 +3,7 @@
 # Copyright 2019 Jonathan Bernard <jonathan@jdbernard.com>
 
 ## Utility methods used internally by Fiber ORM.
-import json, macros, options, sequtils, strutils, times, timeutils, unicode,
+import json, macros, options, sequtils, strutils, times, unicode,
   uuids
 
 import nre except toSeq
@@ -17,6 +17,26 @@ type
     columns*: seq[string]
     placeholders*: seq[string]
     values*: seq[string]
+
+const ISO_8601_FORMATS = @[
+  "yyyy-MM-dd'T'HH:mm:ssz",
+  "yyyy-MM-dd'T'HH:mm:sszzz",
+  "yyyy-MM-dd'T'HH:mm:ss'.'fffzzz",
+  "yyyy-MM-dd HH:mm:ssz",
+  "yyyy-MM-dd HH:mm:sszzz",
+  "yyyy-MM-dd HH:mm:ss'.'fffzzz"
+]
+
+proc parseIso8601(val: string): DateTime =
+  var errString = ""
+  for df in ISO_8601_FORMATS:
+    try: return val.parse(df)
+    except: errString &= "\n" & getCurrentExceptionMsg()
+  raise newException(Exception, "Could not parse date. Tried:" & errString)
+
+proc formatIso8601(d: DateTime): string =
+  return d.format(ISO_8601_FORMATS[2])
+
 
 # TODO: more complete implementation
 # see https://github.com/blakeembrey/pluralize

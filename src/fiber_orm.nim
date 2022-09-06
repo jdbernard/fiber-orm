@@ -83,6 +83,7 @@
 ##
 ## .. code-block:: Nim
 ##    # db.nim
+##    import std/db_postgres
 ##    import fiber_orm
 ##    import ./models.nim
 ##
