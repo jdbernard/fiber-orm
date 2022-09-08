@@ -432,8 +432,8 @@ macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untype
   for t in modelTypes:
     let modelName = $(t.getType[1])
     let getName = ident("get" & modelName)
-    let getAllName = ident("getAll" & modelName & "s")
-    let findWhereName = ident("find" & modelName & "sWhere")
+    let getAllName = ident("getAll" & pluralize(modelName))
+    let findWhereName = ident("find" & pluralize(modelName) & "Where")
     let createName = ident("create" & modelName)
     let updateName = ident("update" & modelName)
     let deleteName = ident("delete" & modelName)
