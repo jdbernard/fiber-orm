@@ -104,26 +104,34 @@
 ##
 ## .. code-block:: Nim
 ##    proc getTodoItem*(db: TodoDB, id: UUID): TodoItem;
-##    proc getAllTodoItems*(db: TodoDB): seq[TodoItem];
+##
 ##    proc createTodoItem*(db: TodoDB, rec: TodoItem): TodoItem;
 ##    proc updateTodoItem*(db: TodoDB, rec: TodoItem): bool;
 ##    proc deleteTodoItem*(db: TodoDB, rec: TodoItem): bool;
 ##    proc deleteTodoItem*(db: TodoDB, id: UUID): bool;
 ##
+##    proc getAllTodoItems*(db: TodoDB,
+##      pagination = none[PaginationParams]()): seq[TodoItem];
+##
 ##    proc findTodoItemsWhere*(db: TodoDB, whereClause: string,
-##      values: varargs[string, dbFormat]): seq[TodoItem];
+##      values: varargs[string, dbFormat], pagination = none[PaginationParams]()
+##      ): seq[TodoItem];
 ##
 ##    proc getTimeEntry*(db: TodoDB, id: UUID): TimeEntry;
-##    proc getAllTimeEntries*(db: TodoDB): seq[TimeEntry];
 ##    proc createTimeEntry*(db: TodoDB, rec: TimeEntry): TimeEntry;
 ##    proc updateTimeEntry*(db: TodoDB, rec: TimeEntry): bool;
 ##    proc deleteTimeEntry*(db: TodoDB, rec: TimeEntry): bool;
 ##    proc deleteTimeEntry*(db: TodoDB, id: UUID): bool;
 ##
-##    proc findTimeEntriesWhere*(db: TodoDB, whereClause: string,
-##      values: varargs[string, dbFormat]): seq[TimeEntry];
+##    proc getAllTimeEntries*(db: TodoDB,
+##      pagination = none[PaginationParams]()): seq[TimeEntry];
 ##
-##    proc findTimeEntriesByTodoItemId(db: TodoDB, todoItemId: UUID): seq[TimeEntry];
+##    proc findTimeEntriesWhere*(db: TodoDB, whereClause: string,
+##      values: varargs[string, dbFormat], pagination = none[PaginationParams]()
+##      ): seq[TimeEntry];
+##
+##    proc findTimeEntriesByTodoItemId(db: TodoDB, todoItemId: UUID,
+##      pagination = none[PaginationParams]()): seq[TimeEntry];
 ##
 ## Object-Relational Modeling
 ## ==========================
@@ -292,8 +300,19 @@ export
   util.rowToModel,
   util.tableName
 
-type NotFoundError* = object of CatchableError ##\
-  ## Error type raised when no record matches a given ID
+type
+  PaginationParams* = object
+    pageSize*: int
+    offset*: int
+    orderBy*: Option[string]
+
+  PagedRecords*[T] = object
+    pagination*: Option[PaginationParams]
+    records*: seq[T]
+    totalRecords*: int
+
+  NotFoundError* = object of CatchableError ##\
+    ## Error type raised when no record matches a given ID
 
 var logNs {.threadvar.}: LoggingNamespace
 
@@ -375,37 +394,114 @@ template getRecord*(db: DbConn, modelType: type, id: typed): untyped =
 
   rowToModel(modelType, row)
 
-template findRecordsWhere*(db: DbConn, modelType: type, whereClause: string, values: varargs[string, dbFormat]): untyped =
+template findRecordsWhere*(
+    db: DbConn,
+    modelType: type,
+    whereClause: string,
+    values: varargs[string, dbFormat],
+    page: Option[PaginationParams]): untyped =
   ## Find all records matching a given `WHERE` clause. The number of elements in
   ## the `values` array must match the number of placeholders (`?`) in the
   ## provided `WHERE` clause.
-  let sqlStmt =
+  var fetchStmt =
     "SELECT " & columnNamesForModel(modelType).join(",") &
     " FROM " & tableName(modelType) &
     " WHERE " & whereClause
 
-  log().debug "findRecordsWhere: [" & sqlStmt & "] values: (" & values.join(", ") & ")"
-  db.getAllRows(sql(sqlStmt), values).mapIt(rowToModel(modelType, it))
+  var countStmt =
+    "SELECT COUNT(*) FROM " & tableName(modelType) &
+    " WHERE " & whereClause
 
-template getAllRecords*(db: DbConn, modelType: type): untyped =
+  if page.isSome:
+    let p = page.get
+    if p.orderBy.isSome:
+      fetchStmt &= " ORDER BY " & p.orderBy.get
+    else:
+      fetchStmt &= " ORDER BY id"
+
+    fetchStmt &= " LIMIT " & $p.pageSize &
+                 " OFFSET " & $p.offset
+
+  log().debug "findRecordsWhere: [" & fetchStmt & "] values: (" & values.join(", ") & ")"
+  let records = db.getAllRows(sql(fetchStmt), values).mapIt(rowToModel(modelType, it))
+
+  PagedRecords[modelType](
+    pagination: page,
+    records: records,
+    totalRecords:
+      if page.isNone: records.len
+      else: db.getRow(sql(countStmt), values)[0].parseInt)
+
+template getAllRecords*(
+    db: DbConn,
+    modelType: type,
+    page: Option[PaginationParams]): untyped =
   ## Fetch all records of the given type.
-  let sqlStmt =
+  var fetchStmt =
     "SELECT " & columnNamesForModel(modelType).join(",") &
     " FROM " & tableName(modelType)
 
-  log().debug "getAllRecords: [" & sqlStmt & "]"
-  db.getAllRows(sql(sqlStmt)).mapIt(rowToModel(modelType, it))
+  var countStmt = "SELECT COUNT(*) FROM " & tableName(modelType)
 
-template findRecordsBy*(db: DbConn, modelType: type, lookups: seq[tuple[field: string, value: string]]): untyped =
+  if page.isSome:
+    let p = page.get
+    if p.orderBy.isSome:
+      fetchStmt &= " ORDER BY " & p.orderBy.get
+    else:
+      fetchStmt &= " ORDER BY id"
+
+    fetchStmt &= " LIMIT " & $p.pageSize &
+                 " OFFSET " & $p.offset
+
+  log().debug "getAllRecords: [" & fetchStmt & "]"
+  let records = db.getAllRows(sql(fetchStmt)).mapIt(rowToModel(modelType, it))
+
+  PagedRecords[modelType](
+    pagination: page,
+    records: records,
+    totalRecords:
+      if page.isNone: records.len
+      else: db.getRow(sql(countStmt))[0].parseInt)
+
+
+template findRecordsBy*(
+    db: DbConn,
+    modelType: type,
+    lookups: seq[tuple[field: string, value: string]],
+    page: Option[PaginationParams]): untyped =
   ## Find all records matching the provided lookup values.
-  let sqlStmt =
-    "SELECT " & columnNamesForModel(modelType).join(",") &
-    " FROM " & tableName(modelType) &
-    " WHERE " & lookups.mapIt(it.field & " = ?").join(" AND ")
+  let whereClause = lookups.mapIt(it.field & " = ?").join(" AND ")
   let values = lookups.mapIt(it.value)
 
-  log().debug "findRecordsBy: [" & sqlStmt & "] values (" & values.join(", ") & ")"
-  db.getAllRows(sql(sqlStmt), values).mapIt(rowToModel(modelType, it))
+  var fetchStmt =
+    "SELECT " & columnNamesForModel(modelType).join(",") &
+    " FROM " & tableName(modelType) &
+    " WHERE " & whereClause
+
+  var countStmt =
+    "SELECT COUNT(*) FROM " & tableName(modelType) &
+    " WHERE " & whereClause
+
+  if page.isSome:
+    let p = page.get
+    if p.orderBy.isSome:
+      fetchStmt &= " ORDER BY " & p.orderBy.get
+    else:
+      fetchStmt &= " ORDER BY id"
+
+    fetchStmt &= " LIMIT " & $p.pageSize &
+                 " OFFSET " & $p.offset
+
+  log().debug "findRecordsBy: [" & fetchStmt & "] values (" & values.join(", ") & ")"
+  let records = db.getAllRows(sql(fetchStmt), values).mapIt(rowToModel(modelType, it))
+
+  PagedRecords[modelType](
+    pagination: page,
+    records: records,
+    totalRecords:
+      if page.isNone: records.len
+      else: db.getRow(sql(countStmt), values)[0].parseInt)
+
 
 macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untyped =
   ## Generate all standard access procedures for the given model types. For a
@@ -442,12 +538,16 @@ macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untype
       proc `getName`*(db: `dbType`, id: `idType`): `t` =
         db.withConn: result = getRecord(conn, `t`, id)
 
-      proc `getAllName`*(db: `dbType`): seq[`t`] =
-        db.withConn: result = getAllRecords(conn, `t`)
+      proc `getAllName`*(db: `dbType`, pagination = none[PaginationParams]()): PagedRecords[`t`] =
+        db.withConn: result = getAllRecords(conn, `t`, pagination)
 
-      proc `findWhereName`*(db: `dbType`, whereClause: string, values: varargs[string, dbFormat]): seq[`t`] =
+      proc `findWhereName`*(
+          db: `dbType`,
+          whereClause: string,
+          values: varargs[string, dbFormat],
+          pagination = none[PaginationParams]()): PagedRecords[`t`] =
         db.withConn:
-          result = findRecordsWhere(conn, `t`, whereClause, values)
+          result = findRecordsWhere(conn, `t`, whereClause, values, pagination)
 
       proc `createName`*(db: `dbType`, rec: `t`): `t` =
         db.withConn: result = createRecord(conn, rec)
@@ -478,7 +578,7 @@ macro generateLookup*(dbType: type, modelType: type, fields: seq[string]): untyp
 
   # Create proc skeleton
   result = quote do:
-    proc `procName`*(db: `dbType`): seq[`modelType`] =
+    proc `procName`*(db: `dbType`): PagedRecords[`modelType`] =
       db.withConn: result = findRecordsBy(conn, `modelType`)
 
   var callParams = quote do: @[]
@@ -496,12 +596,18 @@ macro generateLookup*(dbType: type, modelType: type, fields: seq[string]): untyp
     # Build up the AST for the inner procedure call
     callParams[1].add(paramTuple)
 
+  # Add the optional pagination parameters to the generated proc definition
+  result[3].add(newIdentDefs(
+    ident("pagination"), newEmptyNode(),
+    quote do: none[PaginationParams]()))
+
   # Add the call params to the inner procedure call
   # result[6][0][1][0][1] is
   #   ProcDef -> [6]: StmtList (body) -> [0]: Call ->
   #     [1]: StmtList (withConn body) -> [0]: Asgn (result =) ->
   #     [1]: Call (inner findRecords invocation)
   result[6][0][1][0][1].add(callParams)
+  result[6][0][1][0][1].add(quote do: pagination)
 
 macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tuple[t: type, fields: seq[string]]]): untyped =
   result = newStmtList()
@@ -514,7 +620,7 @@ macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tup
 
     # Create proc skeleton
     let procDefAST = quote do:
-      proc `procName`*(db: `dbType`): seq[`modelType`] =
+      proc `procName`*(db: `dbType`): PagedRecords[`modelType`] =
         db.withConn: result = findRecordsBy(conn, `modelType`)
 
     var callParams = quote do: @[]
@@ -528,7 +634,13 @@ macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tup
       procDefAST[3].add(newIdentDefs(ident(n), ident("string")))
       callParams[1].add(paramTuple)
 
+    # Add the optional pagination parameters to the generated proc definition
+    procDefAST[3].add(newIdentDefs(
+      ident("pagination"), newEmptyNode(),
+      quote do: none[PaginationParams]()))
+
     procDefAST[6][0][1][0][1].add(callParams)
+    procDefAST[6][0][1][0][1].add(quote do: pagination)
 
     result.add procDefAST
 
