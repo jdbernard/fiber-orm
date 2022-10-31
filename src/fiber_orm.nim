@@ -282,11 +282,12 @@
 ##
 ## .. _pool.DbConnPool: fiber_orm/pool.html#DbConnPool
 ##
-import std/db_postgres, std/macros, std/options, std/sequtils, std/strutils
+import std/[db_common, logging, macros, options, sequtils, strutils]
 import namespaced_logging, uuids
 
 from std/unicode import capitalize
 
+import ./fiber_orm/db_common as fiber_db_common
 import ./fiber_orm/pool
 import ./fiber_orm/util
 
@@ -317,7 +318,7 @@ type
 var logNs {.threadvar.}: LoggingNamespace
 
 template log(): untyped =
-  if logNs.isNil: logNs = initLoggingNamespace(name = "fiber_orm", level = lvlNotice)
+  if logNs.isNil: logNs = getLoggerForNamespace(namespace = "fiber_orm", level = lvlNotice)
   logNs
 
 proc newMutateClauses(): MutateClauses =
@@ -326,7 +327,7 @@ proc newMutateClauses(): MutateClauses =
     placeholders: @[],
     values: @[])
 
-proc createRecord*[T](db: DbConn, rec: T): T =
+proc createRecord*[D: DbConnType, T](db: D, rec: T): T =
   ## Create a new record. `rec` is expected to be a `model class`_. The `id`
   ## field is only set if it is non-empty (see `ID Field`_ for details).
   ##
@@ -349,7 +350,7 @@ proc createRecord*[T](db: DbConn, rec: T): T =
 
   result = rowToModel(T, newRow)
 
-proc updateRecord*[T](db: DbConn, rec: T): bool =
+proc updateRecord*[D: DbConnType, T](db: D, rec: T): bool =
   ## Update a record by id. `rec` is expected to be a `model class`_.
   var mc = newMutateClauses()
   populateMutateClauses(rec, false, mc)
@@ -365,13 +366,13 @@ proc updateRecord*[T](db: DbConn, rec: T): bool =
 
   return numRowsUpdated > 0;
 
-template deleteRecord*(db: DbConn, modelType: type, id: typed): untyped =
+template deleteRecord*[D: DbConnType](db: D, modelType: type, id: typed): untyped =
   ## Delete a record by id.
   let sqlStmt = "DELETE FROM " & tableName(modelType) & " WHERE id = ?"
   log().debug "deleteRecord: [" & sqlStmt & "] id: " & $id
   db.tryExec(sql(sqlStmt), $id)
 
-proc deleteRecord*[T](db: DbConn, rec: T): bool =
+proc deleteRecord*[D: DbConnType, T](db: D, rec: T): bool =
   ## Delete a record by `id`_.
   ##
   ## .. _id: #model-class-id-field
@@ -379,7 +380,7 @@ proc deleteRecord*[T](db: DbConn, rec: T): bool =
   log().debug "deleteRecord: [" & sqlStmt & "] id: " & $rec.id
   return db.tryExec(sql(sqlStmt), $rec.id)
 
-template getRecord*(db: DbConn, modelType: type, id: typed): untyped =
+template getRecord*[D: DbConnType](db: D, modelType: type, id: typed): untyped =
   ## Fetch a record by id.
   let sqlStmt =
     "SELECT " & columnNamesForModel(modelType).join(",") &
@@ -394,8 +395,8 @@ template getRecord*(db: DbConn, modelType: type, id: typed): untyped =
 
   rowToModel(modelType, row)
 
-template findRecordsWhere*(
-    db: DbConn,
+template findRecordsWhere*[D: DbConnType](
+    db: D,
     modelType: type,
     whereClause: string,
     values: varargs[string, dbFormat],
@@ -432,8 +433,8 @@ template findRecordsWhere*(
       if page.isNone: records.len
       else: db.getRow(sql(countStmt), values)[0].parseInt)
 
-template getAllRecords*(
-    db: DbConn,
+template getAllRecords*[D: DbConnType](
+    db: D,
     modelType: type,
     page: Option[PaginationParams]): untyped =
   ## Fetch all records of the given type.
@@ -464,8 +465,8 @@ template getAllRecords*(
       else: db.getRow(sql(countStmt))[0].parseInt)
 
 
-template findRecordsBy*(
-    db: DbConn,
+template findRecordsBy*[D: DbConnType](
+    db: D,
     modelType: type,
     lookups: seq[tuple[field: string, value: string]],
     page: Option[PaginationParams]): untyped =
@@ -526,6 +527,10 @@ macro generateProcsForModels*(dbType: type, modelTypes: openarray[type]): untype
   result = newStmtList()
 
   for t in modelTypes:
+    if t.getType[1].typeKind == ntyRef:
+      raise newException(ValueError,
+        "fiber_orm model object must be objects, not refs")
+
     let modelName = $(t.getType[1])
     let getName = ident("get" & modelName)
     let getAllName = ident("getAll" & pluralize(modelName))
@@ -644,11 +649,12 @@ macro generateProcsForFieldLookups*(dbType: type, modelsAndFields: openarray[tup
 
     result.add procDefAST
 
-proc initPool*(
-    connect: proc(): DbConn,
+proc initPool*[D: DbConnType](
+    connect: proc(): D,
     poolSize = 10,
     hardCap = false,
-    healthCheckQuery = "SELECT 'true' AS alive"): DbConnPool =
+    healthCheckQuery = "SELECT 'true' AS alive"): DbConnPool[D] =
+
   ## Initialize a new DbConnPool. See the `initDb` procedure in the `Example
   ## Fiber ORM Usage`_ for an example
   ##
@@ -666,13 +672,13 @@ proc initPool*(
   ##
   ## .. _Example Fiber ORM Usage: #basic-usage-example-fiber-orm-usage
 
-  initDbConnPool(DbConnPoolConfig(
+  initDbConnPool(DbConnPoolConfig[D](
     connect: connect,
     poolSize: poolSize,
     hardCap: hardCap,
     healthCheckQuery: healthCheckQuery))
 
-template inTransaction*(db: DbConnPool, body: untyped) =
+template inTransaction*[D: DbConnType](db: DbConnPool[D], body: untyped) =
   pool.withConn(db):
     conn.exec(sql"BEGIN TRANSACTION")
     try:

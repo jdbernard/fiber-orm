@@ -4,65 +4,70 @@
 
 ## Simple database connection pooling implementation compatible with Fiber ORM.
 
-import std/db_postgres, std/sequtils, std/strutils, std/sugar
+import std/[db_common, logging, sequtils, strutils, sugar]
+
+from std/db_sqlite import getRow
+from std/db_postgres import getRow
 
 import namespaced_logging
-
+import ./db_common as fiber_db_common
 
 type
-  DbConnPoolConfig* = object
-    connect*: () -> DbConn  ## Factory procedure to create a new DBConn
-    poolSize*: int ## The pool capacity.
-    hardCap*: bool ## Is the pool capacity a hard cap?
-                   ##
-                   ## When `false`, the pool can grow beyond the configured
-                   ## capacity, but will release connections down to the its
-                   ## capacity (no less than `poolSize`).
-                   ##
-                   ## When `true` the pool will not create more than its
-                   ## configured capacity.  It a connection is requested, none
-                   ## are free, and the pool is at capacity, this will result
-                   ## in an Error being raised.
+  DbConnPoolConfig*[D: DbConnType] = object
+    connect*: () -> D   ## Factory procedure to create a new DBConn
+    poolSize*: int      ## The pool capacity.
+
+    hardCap*: bool      ## Is the pool capacity a hard cap?
+                        ##
+                        ## When `false`, the pool can grow beyond the
+                        ## configured capacity, but will release connections
+                        ## down to the its capacity (no less than `poolSize`).
+                        ##
+                        ## When `true` the pool will not create more than its
+                        ## configured capacity.  It a connection is requested,
+                        ## none are free, and the pool is at capacity, this
+                        ## will result in an Error being raised.
+
     healthCheckQuery*: string ## Should be a simple and fast SQL query that the
                               ## pool can use to test the liveliness of pooled
                               ## connections.
 
-  PooledDbConn = ref object
-    conn: DbConn
+  PooledDbConn[D: DbConnType] = ref object
+    conn: D
     id: int
     free: bool
 
-  DbConnPool* = ref object
+  DbConnPool*[D: DbConnType] = ref object
     ## Database connection pool
-    conns: seq[PooledDbConn]
-    cfg: DbConnPoolConfig
+    conns: seq[PooledDbConn[D]]
+    cfg: DbConnPoolConfig[D]
     lastId: int
 
 var logNs {.threadvar.}: LoggingNamespace
 
 template log(): untyped =
-  if logNs.isNil: logNs = initLoggingNamespace(name = "fiber_orm/pool", level = lvlNotice)
+  if logNs.isNil: logNs = getLoggerForNamespace(namespace = "fiber_orm/pool", level = lvlNotice)
   logNs
 
-proc initDbConnPool*(cfg: DbConnPoolConfig): DbConnPool =
+proc initDbConnPool*[D: DbConnType](cfg: DbConnPoolConfig[D]): DbConnPool[D] =
   log().debug("Initializing new pool (size: " & $cfg.poolSize)
-  result = DbConnPool(
+  result = DbConnPool[D](
     conns: @[],
     cfg: cfg)
 
-proc newConn(pool: DbConnPool): PooledDbConn =
+proc newConn[D: DbConnType](pool: DbConnPool[D]): PooledDbConn[D] =
   log().debug("Creating a new connection to add to the pool.")
   pool.lastId += 1
   let conn = pool.cfg.connect()
-  result = PooledDbConn(
+  result = PooledDbConn[D](
     conn: conn,
     id: pool.lastId,
     free: true)
   pool.conns.add(result)
 
-proc maintain(pool: DbConnPool): void =
+proc maintain[D: DbConnType](pool: DbConnPool[D]): void =
   log().debug("Maintaining pool. $# connections." % [$pool.conns.len])
-  pool.conns.keepIf(proc (pc: PooledDbConn): bool =
+  pool.conns.keepIf(proc (pc: PooledDbConn[D]): bool =
     if not pc.free: return true
 
     try:
@@ -91,7 +96,7 @@ proc maintain(pool: DbConnPool): void =
         "Trimming pool size. Culled $# free connections. $# connections remaining." %
         [$toCull.len, $pool.conns.len])
 
-proc take*(pool: DbConnPool): tuple[id: int, conn: DbConn] =
+proc take*[D: DbConnType](pool: DbConnPool[D]): tuple[id: int, conn: D] =
   ## Request a connection from the pool. Returns a DbConn if the pool has free
   ## connections, or if it has the capacity to create a new connection. If the
   ## pool is configured with a hard capacity limit and is out of free
@@ -113,13 +118,13 @@ proc take*(pool: DbConnPool): tuple[id: int, conn: DbConn] =
   log().debug("Reserve connection $#" % [$reserved.id])
   return (id: reserved.id, conn: reserved.conn)
 
-proc release*(pool: DbConnPool, connId: int): void =
+proc release*[D: DbConnType](pool: DbConnPool[D], connId: int): void =
   ## Release a connection back to the pool.
   log().debug("Reclaiming released connaction $#" % [$connId])
   let foundConn = pool.conns.filterIt(it.id == connId)
   if foundConn.len > 0: foundConn[0].free = true
 
-template withConn*(pool: DbConnPool, stmt: untyped): untyped =
+template withConn*[D: DbConnType](pool: DbConnPool[D], stmt: untyped): untyped =
   ## Convenience template to provide a connection from the pool for use in a
   ## statement block, automatically releasing that connnection when done.
   ##

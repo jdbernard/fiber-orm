@@ -3,10 +3,10 @@
 # Copyright 2019 Jonathan Bernard <jonathan@jdbernard.com>
 
 ## Utility methods used internally by Fiber ORM.
-import json, macros, options, sequtils, strutils, times, unicode,
-  uuids
+import std/[json, macros, options, sequtils, strutils, times, unicode]
+import uuids
 
-import nre except toSeq
+import std/nre except toSeq
 
 type
   MutateClauses* = object
@@ -207,21 +207,14 @@ proc parseDbArray*(val: string): seq[string] =
   if not (parseState == inQuote) and curStr.len > 0:
     result.add(curStr)
 
-proc createParseStmt*(t, value: NimNode): NimNode =
+func createParseStmt*(t, value: NimNode): NimNode =
   ## Utility method to create the Nim cod required to parse a value coming from
   ## the a database query. This is used by functions like `rowToModel` to parse
   ## the dataabase columns into the Nim object fields.
 
-  #echo "Creating parse statment for ", t.treeRepr
   if t.typeKind == ntyObject:
 
-    if t.getType == UUID.getType:
-      result = quote do: parseUUID(`value`)
-
-    elif t.getType == DateTime.getType:
-      result = quote do: parsePGDatetime(`value`)
-
-    elif t.getTypeInst == Option.getType:
+    if t.getTypeInst == Option.getType:
       var innerType = t.getTypeImpl[2][0] # start at the first RecList
       # If the value is a non-pointer type, there is another inner RecList
       if innerType.kind == nnkRecList: innerType = innerType[0]
@@ -232,7 +225,27 @@ proc createParseStmt*(t, value: NimNode): NimNode =
         if `value`.len == 0:  none[`innerType`]()
         else:                 some(`parseStmt`)
 
+    elif t.getType == UUID.getType:
+      result = quote do: parseUUID(`value`)
+
+    elif t.getType == DateTime.getType:
+      result = quote do: parsePGDatetime(`value`)
+
     else: error "Unknown value object type: " & $t.getTypeInst
+
+  elif t.typeKind == ntyGenericInst:
+
+    if t.kind == nnkBracketExpr and
+       t.len > 0 and
+       t[0] == Option.getType:
+
+      var innerType = t.getTypeInst[1]
+      let parseStmt = createParseStmt(innerType, value)
+      result = quote do:
+        if `value`.len == 0:  none[`innerType`]()
+        else:                 some(`parseStmt`)
+
+    else: error "Unknown generic instance type: " & $t.getTypeInst
 
   elif t.typeKind == ntyRef:
 
@@ -268,28 +281,72 @@ proc createParseStmt*(t, value: NimNode): NimNode =
   else:
     error "Unknown value type: " & $t.typeKind
 
+func fields(t: NimNode): seq[tuple[fieldIdent: NimNode, fieldType: NimNode]] =
+  #[
+  debugEcho "T: " & t.treeRepr
+  debugEcho "T.kind: " & $t.kind
+  debugEcho "T.typeKind: " & $t.typeKind
+  debugEcho "T.GET_TYPE[1]: " & t.getType[1].treeRepr
+  debugEcho "T.GET_TYPE[1].kind: " & $t.getType[1].kind
+  debugEcho "T.GET_TYPE[1].typeKind: " & $t.getType[1].typeKind
+
+  debugEcho "T.GET_TYPE: " & t.getType.treeRepr
+  debugEcho "T.GET_TYPE[1].GET_TYPE: " & t.getType[1].getType.treeRepr
+  ]#
+
+  # Get the object type AST, with base object (if present) and record list.
+  var objDefAst: NimNode
+  if t.typeKind == ntyObject: objDefAst = t.getType
+  elif t.typeKind == ntyTypeDesc:
+    # In this case we have a type AST that is like:
+    # BracketExpr
+    #   Sym "typeDesc"
+    #   Sym "ModelType"
+    objDefAst = t.
+      getType[1].         # get the Sym "ModelType"
+      getType             # get the object definition type
+
+    if objDefAst.kind != nnkObjectTy:
+      error ("unable to enumerate the fields for model type '$#', " &
+        "tried to resolve the type of the provided symbol to an object " &
+        "definition (nnkObjectTy) but got a '$#'.\pAST:\p$#") % [
+          $t, $objDefAst.kind, objDefAst.treeRepr ]
+  else:
+    error ("unable to enumerate the fields for model type '$#', " &
+      "expected a symbol with type ntyTypeDesc but got a '$#'.\pAST:\p$#") % [
+        $t, $t.typeKind, t.treeRepr ]
+
+  # At this point objDefAst should look something like:
+  # ObjectTy
+  #   Empty
+  #   Sym "BaseObject"" | Empty
+  #   RecList
+  #     Sym "field1"
+  #     Sym "field2"
+  #     ...
+
+  if objDefAst[1].kind == nnkSym:
+    # We have a base class symbol, let's recurse and try and resolve the fields
+    # for the base class
+    for fieldDef in objDefAst[1].fields: result.add(fieldDef)
+
+  for fieldDef in objDefAst[2].children:
+    # objDefAst[2] is a RecList of
+    # ignore AST nodes that are not field definitions
+    if fieldDef.kind == nnkIdentDefs: result.add((fieldDef[0], fieldDef[1]))
+    elif fieldDef.kind == nnkSym: result.add((fieldDef, fieldDef.getTypeInst))
+    else: error "unknown object field definition AST: $#" % $fieldDef.kind
+
 template walkFieldDefs*(t: NimNode, body: untyped) =
   ## Iterate over every field of the given Nim object, yielding and defining
   ## `fieldIdent` and `fieldType`, the name of the field as a Nim Ident node
   ## and the type of the field as a Nim Type node respectively.
-  let tTypeImpl = t.getTypeImpl
+  for (fieldIdent {.inject.}, fieldType {.inject.}) in t.fields: body
 
-  var nodeToItr: NimNode
-  if tTypeImpl.typeKind == ntyObject: nodeToItr = tTypeImpl[2]
-  elif tTypeImpl.typeKind == ntyTypeDesc: nodeToItr = tTypeImpl.getType[1].getType[2]
-  else: error $t & " is not an object or type desc (it's a " & $tTypeImpl.typeKind & ")."
-
-  for fieldDef {.inject.} in nodeToItr.children:
-    # ignore AST nodes that are not field definitions
-    if fieldDef.kind == nnkIdentDefs:
-      let fieldIdent {.inject.} = fieldDef[0]
-      let fieldType {.inject.} = fieldDef[1]
-      body
-
-    elif fieldDef.kind == nnkSym:
-      let fieldIdent {.inject.} = fieldDef
-      let fieldType {.inject.} = fieldDef.getType
-      body
+#[ TODO: replace walkFieldDefs with things like this:
+func columnNamesForModel*(modelType: typedesc): seq[string] =
+  modelType.fields.mapIt(identNameToDb($it[0]))
+]#
 
 macro columnNamesForModel*(modelType: typed): seq[string] =
   ## Return the column names corresponding to the the fields of the given
@@ -317,6 +374,7 @@ macro rowToModel*(modelType: typed, row: seq[string]): untyped =
       createParseStmt(fieldType, itemLookup)))
     idx += 1
 
+#[
 macro listFields*(t: typed): untyped =
   var fields: seq[tuple[n: string, t: string]] = @[]
   t.walkFieldDefs:
@@ -324,6 +382,7 @@ macro listFields*(t: typed): untyped =
     else: fields.add((n: $fieldIdent, t: $fieldType))
 
   result = newLit(fields)
+]#
 
 proc typeOfColumn*(modelType: NimNode, colName: string): NimNode =
   ## Given a model type and a column name, return the Nim type for that column.
@@ -370,8 +429,8 @@ macro populateMutateClauses*(t: typed, newRecord: bool, mc: var MutateClauses): 
 
       # if we're looking at an optional field, add logic to check for presence
       elif fieldType.kind == nnkBracketExpr and
-         fieldType.len > 0 and
-         fieldType[0] == Option.getType:
+           fieldType.len > 0 and
+           fieldType[0] == Option.getType:
 
         result.add quote do:
           `mc`.columns.add(identNameToDb(`fieldName`))
